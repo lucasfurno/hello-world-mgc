@@ -10,11 +10,10 @@ FROM node:18-alpine
 WORKDIR /root/
 COPY --from=builder /usr/src/app .
 
-# Comando para criar um arquivo de 8GB
-# O fallocate cria um arquivo de um determinado tamanho rapidamente, sem de fato escrever zeros,
-# o que torna o build da imagem mais rápido. A imagem final terá o tamanho desejado.
-RUN apk add --no-cache util-linux && \
-    fallocate -l 8G large_file.img
+# Comando para criar um arquivo de 8GB escrevendo dados reais
+# ATENÇÃO: Este comando é lento e irá demorar vários minutos para ser concluído.
+# Ele lê do /dev/zero (bytes nulos) e escreve um arquivo de 8GB (8192 blocos de 1MB).
+RUN dd if=/dev/zero of=large_file.img bs=1M count=8192
 
 EXPOSE 8080
 CMD ["npm", "start"]
