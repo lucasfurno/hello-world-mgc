@@ -1,0 +1,87 @@
+name: Debug MCR Large Image Push
+
+on:
+  workflow_dispatch: # Permite acionamento manual
+
+jobs:
+  build-and-push-large-image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Define as duas regiões do Magalu Cloud para testar
+        region: [se-1, ne-1]
+      fail-fast: false # Garante que um job continue mesmo que o outro falhe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Define MCR Endpoint and Image Tag
+        id: mcr-config
+        run: |
+          # Define o endpoint do registry baseado na região da matrix
+          REGISTRY_URL="container-registry.br-${{ matrix.region }}.magalu.cloud"
+          # Monta a tag da imagem no formato especificado
+          IMAGE_TAG="${REGISTRY_URL}/hello-world-furno/hello-world:latest"
+          
+          echo "REGISTRY_URL=${REGISTRY_URL}" >> $GITHUB_OUTPUT
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Select Correct Password for Region
+        id: region-password
+        run: |
+          # Verifica a região atual e seleciona o secret de senha correspondente
+          if [ "${{ matrix.region }}" == "se-1" ]; then
+            echo "MCR_PASSWORD=${{ secrets.MCR_PASSWORD_SE1 }}" >> $GITHUB_OUTPUT
+          else
+            echo "MCR_PASSWORD=${{ secrets.MCR_PASSWORD_NE1 }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Log in to Magalu Container Registry
+        # Utiliza a senha correta para a região, selecionada no passo anterior
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ steps.mcr-config.outputs.REGISTRY_URL }}
+          username: ${{ secrets.MCR_USERNAME }}
+          password: ${{ steps.region-password.outputs.MCR_PASSWORD }}
+
+      - name: Build a 8GB Docker image
+        id: build
+        uses: docker/build-push-action@v4
+        with:
+          context: ./app
+          file: ./app/Dockerfile
+          push: false # Apenas constrói a imagem localmente por enquanto
+          tags: ${{ steps.mcr-config.outputs.IMAGE_TAG }}
+          load: true # Carrega a imagem no runner para que o tcpdump possa capturá-la
+
+      - name: Run Traceroute
+        run: |
+          echo "--- Running Traceroute for ${{ matrix.region }} (${{ steps.mcr-config.outputs.REGISTRY_URL }}) ---"
+          sudo apt-get update && sudo apt-get install -y traceroute
+          traceroute ${{ steps.mcr-config.outputs.REGISTRY_URL }}
+          echo "------------------------------------------------"
+
+      - name: Run TCPDUMP and Push Image
+        run: |
+          # Inicia o tcpdump em background para o host do registry da região
+          sudo tcpdump -i any host ${{ steps.mcr-config.outputs.REGISTRY_URL }} -w tcpdump_${{ matrix.region }}.pcap &
+          TCPDUMP_PID=$!
+
+          echo "Starting Docker push to ${{ steps.mcr-config.outputs.IMAGE_TAG }}"
+          
+          docker push ${{ steps.mcr-config.outputs.IMAGE_TAG }} || echo "Docker push failed for ${{ matrix.region }}"
+          
+          echo "Docker push finished. Stopping tcpdump..."
+          
+          sudo kill $TCPDUMP_PID
+          sleep 5
+
+      - name: Upload TCPDUMP results
+        uses: actions/upload-artifact@v3
+        with:
+          name: tcpdump-capture-${{ matrix.region }}
+          path: tcpdump_${{ matrix.region }}.pcap
