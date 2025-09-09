@@ -13,7 +13,7 @@ COPY --from=builder /usr/src/app .
 # Comando para criar um arquivo de 8GB com dados aleatórios (não compressíveis)
 # ATENÇÃO: Este comando é EXTREMAMENTE LENTO e pode levar muitos minutos para ser concluído.
 # Ele lê de /dev/urandom (dados aleatórios) para garantir que a camada da imagem não seja comprimida.
-RUN dd if=/dev/urandom of=large_file.img bs=1M count=8192
+RUN dd if=/dev/urandom of=large_file.img bs=1M count=400
 
 EXPOSE 8080
 CMD ["npm", "start"]
